@@ -67,6 +67,8 @@ do {                                                                           \
 
 /* must be called after it's called from scheduler. */
 #define SCHED_INIT(s)	(s) = NULL
+#define SELECT_SEC_MAX  86400  /* kernel's upper limit is actually 100000000 */
+#define SELECT_USEC_MAX 1000000 /* kernel's upper limit */
 
 struct scheddump {
 	time_t xtime;
@@ -81,5 +83,6 @@ void sched_kill __P((struct sched *));
 int sched_dump __P((caddr_t *, int *));
 void sched_init __P((void));
 void sched_scrub_param __P((void *));
+time_t current_time __P((void));
 
 #endif /* _SCHEDULE_H */

@@ -93,11 +93,15 @@
 #include "nattraversal.h"
 #include "ipsecSessionTracer.h"
 #include "ipsecMessageTracer.h"
+#ifndef HAVE_OPENSSL
+#include <Security/SecDH.h>
+#endif
 
 /* quick mode */
 static vchar_t *quick_ir1mx __P((struct ph2handle *, vchar_t *, vchar_t *));
 static int get_sainfo_r __P((struct ph2handle *));
-static int get_proposal_r __P((struct ph2handle *, int));
+static int get_proposal_r __P((struct ph2handle *));
+static int get_proposal_r_remote __P((struct ph2handle *, int));
 
 /* %%%
  * Quick Mode
@@ -217,8 +221,13 @@ quick_i1send(iph2, msg)
 				"failed to set DH value.\n");
 			goto end;
 		}
+#ifdef HAVE_OPENSSL
 		if (oakley_dh_generate(iph2->pfsgrp,
-				&iph2->dhpub, &iph2->dhpriv) < 0) {
+							   &iph2->dhpub, &iph2->dhpriv) < 0) {
+#else
+		if (oakley_dh_generate(iph2->pfsgrp,
+				&iph2->dhpub, &iph2->publicKeySize, &iph2->dhC) < 0) {
+#endif
 			plog(LLV_ERROR, LOCATION, NULL,
 				 "failed to generate DH");
 			goto end;
@@ -467,6 +476,12 @@ quick_i2recv(iph2, msg0)
 	/* allocate buffer for computing HASH(2) */
 	tlen = iph2->nonce->l
 		+ ntohl(isakmp->len) - sizeof(*isakmp);
+	if (tlen < 0) {
+		plog(LLV_ERROR, LOCATION, NULL,
+			 "invalid length (%d,%d) while getting hash buffer.\n",
+			 iph2->nonce->l, ntohl(isakmp->len));
+		goto end;
+	}
 	hbuf = vmalloc(tlen);
 	if (hbuf == NULL) {
 		plog(LLV_ERROR, LOCATION, NULL,
@@ -554,6 +569,10 @@ quick_i2recv(iph2, msg0)
 						if (f_id == 0 && (iph2->ph1->natt_flags & NAT_DETECTED_ME)) {
 							if (lcconf->ext_nat_id)
 								vfree(lcconf->ext_nat_id);
+							if (idp_ptr->h.len < sizeof(struct isakmp_gen)) {
+								plog(LLV_ERROR, LOCATION, NULL, "invalid length (%d) while allocating external nat id.\n", idp_ptr->h.len);
+								goto end;
+							}
 							lcconf->ext_nat_id = vmalloc(ntohs(idp_ptr->h.len) - sizeof(struct isakmp_gen));
 							if (lcconf->ext_nat_id == NULL) {
 								plog(LLV_ERROR, LOCATION, NULL, "memory error while allocating external nat id.\n");
@@ -568,6 +587,7 @@ quick_i2recv(iph2, msg0)
 								goto end;
 							}
 							plog(LLV_DEBUG, LOCATION, NULL, "external nat address saved.\n");
+							plogdump(LLV_DEBUG, iph2->ext_nat_id->v, iph2->ext_nat_id->l);
 						} else if (f_id && (iph2->ph1->natt_flags & NAT_DETECTED_PEER)) {
 							if (iph2->ext_nat_id_p)
 								vfree(iph2->ext_nat_id_p);
@@ -578,6 +598,7 @@ quick_i2recv(iph2, msg0)
 							}
 							memcpy(iph2->ext_nat_id_p->v, &(idp_ptr->b), iph2->ext_nat_id_p->l);
 							plog(LLV_DEBUG, LOCATION, NULL, "peer's external nat address saved.\n");
+							plogdump(LLV_DEBUG, iph2->ext_nat_id_p->v, iph2->ext_nat_id_p->l);
 						} 
 					} else {
 						plog(LLV_ERROR, LOCATION, NULL, "mismatched ID was returned.\n");
@@ -840,7 +861,7 @@ quick_i2send(iph2, msg0)
 	/* the sending message is added to the received-list. */
 	if (add_recvdpkt(iph2->ph1->remote, iph2->ph1->local,
                      iph2->sendbuf, msg0,
-                     PH2_NON_ESP_EXTRA_LEN(iph2)) == -1) {
+                     PH2_NON_ESP_EXTRA_LEN(iph2), PH2_FRAG_FLAGS(iph2)) == -1) {
 		plog(LLV_ERROR , LOCATION, NULL,
 			"failed to add a response packet to the tree.\n");
 		goto end;
@@ -941,7 +962,7 @@ quick_i3recv(iph2, msg0)
 	msg = oakley_do_decrypt(iph2->ph1, msg0, iph2->ivm->iv, iph2->ivm->ive);
 	if (msg == NULL) {
 		plog(LLV_ERROR, LOCATION, NULL,
-			 "failed to decrypt packet");
+			 "failed to decrypt packet\n");
 		goto end;
 	}
 
@@ -949,7 +970,7 @@ quick_i3recv(iph2, msg0)
 	pbuf = isakmp_parse(msg);
 	if (pbuf == NULL) {
 		plog(LLV_ERROR, LOCATION, NULL,
-			 "failed to parse msg");
+			 "failed to parse msg\n");
 		goto end;
 	}
 
@@ -1009,7 +1030,7 @@ quick_i3recv(iph2, msg0)
 	vfree(tmp);
 	if (my_hash == NULL) {
 		plog(LLV_ERROR, LOCATION, NULL,
-			 "failed to compute HASH");
+			 "failed to compute HASH\n");
 		goto end;
 	}
 
@@ -1113,7 +1134,7 @@ quick_r1recv(iph2, msg0)
 	msg = oakley_do_decrypt(iph2->ph1, msg0, iph2->ivm->iv, iph2->ivm->ive);
 	if (msg == NULL) {
 		plog(LLV_ERROR, LOCATION, NULL,
-			 "failed to decrypt packet");
+			 "failed to decrypt packet\n");
 		goto end;
 	}
 
@@ -1127,7 +1148,7 @@ quick_r1recv(iph2, msg0)
 	pbuf = isakmp_parse(msg);
 	if (pbuf == NULL) {
 		plog(LLV_ERROR, LOCATION, NULL,
-			 "failed to parse msg");
+			 "failed to parse msg\n");
 		goto end;
 	}
 	pa = (struct isakmp_parse_t *)pbuf->v;
@@ -1160,6 +1181,11 @@ quick_r1recv(iph2, msg0)
 
 	/* allocate buffer for computing HASH(1) */
 	tlen = ntohl(isakmp->len) - sizeof(*isakmp);
+	if (tlen < 0) {
+		plog(LLV_ERROR, LOCATION, NULL, "invalid length (%d) while extracting hash.\n",
+			 ntohl(isakmp->len));
+		goto end;
+	}
 	hbuf = vmalloc(tlen);
 	if (hbuf == NULL) {
 		plog(LLV_ERROR, LOCATION, NULL,
@@ -1204,7 +1230,7 @@ quick_r1recv(iph2, msg0)
 			}
 			if (isakmp_p2ph(&iph2->sa, pa->ptr) < 0) {
 				plog(LLV_ERROR, LOCATION, NULL,
-					 "failed to process SA payload");
+					 "failed to process SA payload\n");
 				goto end;
 			}
 			break;
@@ -1212,7 +1238,7 @@ quick_r1recv(iph2, msg0)
 		case ISAKMP_NPTYPE_NONCE:
 			if (isakmp_p2ph(&iph2->nonce_p, pa->ptr) < 0) {
 				plog(LLV_ERROR, LOCATION, NULL,
-					 "failed to process NONCE payload");
+					 "failed to process NONCE payload\n");
 				goto end;
 			}
 			break;
@@ -1220,7 +1246,7 @@ quick_r1recv(iph2, msg0)
 		case ISAKMP_NPTYPE_KE:
 			if (isakmp_p2ph(&iph2->dhpub_p, pa->ptr) < 0) {
 				plog(LLV_ERROR, LOCATION, NULL,
-					 "failed to process KE payload");
+					 "failed to process KE payload\n");
 				goto end;
 			}
 			break;
@@ -1232,7 +1258,7 @@ quick_r1recv(iph2, msg0)
 
 				if (isakmp_p2ph(&iph2->id_p, pa->ptr) < 0) {
 					plog(LLV_ERROR, LOCATION, NULL,
-						 "failed to process IDci2 payload");
+						 "failed to process IDci2 payload\n");
 					goto end;
 				}
 
@@ -1248,7 +1274,7 @@ quick_r1recv(iph2, msg0)
 
 				if (isakmp_p2ph(&iph2->id, pa->ptr) < 0) {
 					plog(LLV_ERROR, LOCATION, NULL,
-						 "failed to process IDcr2 payload");
+						 "failed to process IDcr2 payload\n");
 					goto end;
 				}
 			} else {
@@ -1345,7 +1371,7 @@ quick_r1recv(iph2, msg0)
 	my_hash = oakley_compute_hash1(iph2->ph1, iph2->msgid, hbuf);
 	if (my_hash == NULL) {
 		plog(LLV_ERROR, LOCATION, NULL,
-			 "failed to compute HASH");
+			 "failed to compute HASH\n");
 		goto end;
 	}
 
@@ -1369,12 +1395,7 @@ quick_r1recv(iph2, msg0)
 	}
 
     /* check the existence of ID payload and create responder's proposal */
-    error = get_proposal_r(iph2, 0);
-    if (error != -2 && error != 0 && 
-		(((iph2->ph1->natt_flags & NAT_DETECTED_ME) && lcconf->ext_nat_id != NULL) ||
-		 (iph2->parent_session && iph2->parent_session->is_client)))
-        error = get_proposal_r(iph2, 1);
-		
+	error = get_proposal_r(iph2);
 	switch (error) {
 	case -2:
 		/* generate a policy template from peer's proposal */
@@ -1560,8 +1581,13 @@ quick_r2send(iph2, msg)
 			goto end;
 		}
 		/* generate DH public value */
+#ifdef HAVE_OPENSSL
 		if (oakley_dh_generate(iph2->pfsgrp,
 				&iph2->dhpub, &iph2->dhpriv) < 0) {
+#else
+			if (oakley_dh_generate(iph2->pfsgrp,
+								   &iph2->dhpub, &iph2->publicKeySize, &iph2->dhC) < 0) {
+#endif		
 			plog(LLV_ERROR, LOCATION, NULL,
 				 "failed to generate DH public");
 			goto end;
@@ -1602,6 +1628,8 @@ quick_r2send(iph2, msg)
 	}
 #endif
 
+	plog(LLV_DEBUG, LOCATION, NULL, "Approved SA\n");
+	printsaprop0(LLV_DEBUG, iph2->approval);
 
 	body = vmalloc(tlen);
 	if (body == NULL) { 
@@ -1634,9 +1662,13 @@ quick_r2send(iph2, msg)
 	if (iph2->id_p != NULL) {
 		/* IDci */
 		p = set_isakmp_payload(p, iph2->id_p, ISAKMP_NPTYPE_ID);
+		plog(LLV_DEBUG, LOCATION, NULL, "sending IDci2:\n");
+		plogdump(LLV_DEBUG, iph2->id_p->v, iph2->id_p->l);
 		/* IDcr */
 		np_p = &((struct isakmp_gen *)p)->np;	/* XXX */
 		p = set_isakmp_payload(p, iph2->id, (natoa_type ? natoa_type : ISAKMP_NPTYPE_NONE));
+		plog(LLV_DEBUG, LOCATION, NULL, "sending IDcr2:\n");
+		plogdump(LLV_DEBUG, iph2->id->v, iph2->id->l);
 	}
 
 	/* add a RESPONDER-LIFETIME notify payload if needed */
@@ -1746,7 +1778,7 @@ quick_r2send(iph2, msg)
 
 	/* the sending message is added to the received-list. */
 	if (add_recvdpkt(iph2->ph1->remote, iph2->ph1->local, iph2->sendbuf, iph2->msg1,
-                     PH2_NON_ESP_EXTRA_LEN(iph2)) == -1) {
+                     PH2_NON_ESP_EXTRA_LEN(iph2), PH2_FRAG_FLAGS(iph2)) == -1) {
 		plog(LLV_ERROR , LOCATION, NULL,
 			"failed to add a response packet to the tree.\n");
 		goto end;
@@ -1812,7 +1844,7 @@ quick_r3recv(iph2, msg0)
 	msg = oakley_do_decrypt(iph2->ph1, msg0, iph2->ivm->iv, iph2->ivm->ive);
 	if (msg == NULL) {
 		plog(LLV_ERROR, LOCATION, NULL,
-			 "failed to decrypt packet");
+			 "failed to decrypt packet\n");
 		goto end;
 	}
 
@@ -1820,7 +1852,7 @@ quick_r3recv(iph2, msg0)
 	pbuf = isakmp_parse(msg);
 	if (pbuf == NULL) {
 		plog(LLV_ERROR, LOCATION, NULL,
-			 "failed to parse msg");
+			 "failed to parse msg\n");
 		goto end;
 	}
 
@@ -1878,7 +1910,7 @@ quick_r3recv(iph2, msg0)
 	vfree(tmp);
 	if (my_hash == NULL) {
 		plog(LLV_ERROR, LOCATION, NULL,
-			 "failed to compute HASH");
+			 "failed to compute HASH\n");
 		goto end;
 	}
 
@@ -2019,7 +2051,7 @@ quick_r3send(iph2, msg0)
 
 	/* the sending message is added to the received-list. */
 	if (add_recvdpkt(iph2->ph1->remote, iph2->ph1->local, iph2->sendbuf, msg0,
-                     PH2_NON_ESP_EXTRA_LEN(iph2)) == -1) {
+                     PH2_NON_ESP_EXTRA_LEN(iph2), PH2_FRAG_FLAGS(iph2)) == -1) {
 		plog(LLV_ERROR , LOCATION, NULL,
 			"failed to add a response packet to the tree.\n");
 		goto end;
@@ -2327,6 +2359,18 @@ get_sainfo_r(iph2)
 				plog(LLV_DEBUG2, LOCATION, NULL,
 					 "get_sainfo_r case 2.\n");
 			}
+			// still no sainfo (or anonymous): fallback to sainfo picked by dst id
+			if ((iph2->sainfo == NULL || iph2->sainfo->idsrc == NULL) && iph2->id_p) {
+				plog(LLV_DEBUG2, LOCATION, NULL,
+					 "get_sainfo_r about to try dst id only.\n");
+				iph2->sainfo = getsainfo_by_dst_id(iph2->id_p, iph2->ph1->id_p);
+				if (iph2->sainfo) {
+					plog(LLV_DEBUG2, LOCATION, NULL,
+						 "get_sainfo_r case 3.\n");
+					if (iph2->sainfo->idsrc == NULL)
+						anonymous = iph2->sainfo;
+				}
+			}
 		}
 	}
 	if (iph2->sainfo == NULL) {
@@ -2337,14 +2381,12 @@ get_sainfo_r(iph2)
 		}
 		iph2->sainfo = anonymous;
 	}
-#ifdef __APPLE__
 	if (link_sainfo_to_ph2(iph2->sainfo) != 0) {
 		plog(LLV_ERROR, LOCATION, NULL,
 			 "failed to link sainfo\n");
 		iph2->sainfo = NULL;
 		goto end;
 	}
-#endif
 	
 #ifdef ENABLE_HYBRID
 	/* xauth group inclusion check */
@@ -2369,6 +2411,22 @@ end:
 	return error;
 }
 
+static int
+get_proposal_r(iph2)
+	struct ph2handle *iph2;
+{
+	int error = get_proposal_r_remote(iph2, 0);
+	if (error != -2 && error != 0 && 
+		(((iph2->ph1->natt_flags & NAT_DETECTED_ME) && lcconf->ext_nat_id != NULL) ||
+		 (iph2->parent_session && iph2->parent_session->is_client))) {
+		if (iph2->parent_session && iph2->parent_session->is_client)
+			error = ike_session_get_proposal_r(iph2);
+		if (error != -2 && error != 0)
+			error = get_proposal_r_remote(iph2, 1);					
+	}
+	return error;
+}
+
 /*
  * Copy both IP addresses in ID payloads into [src,dst]_id if both ID types
  * are IP address and same address family.
@@ -2380,9 +2438,9 @@ end:
  * NOTE: This function is only for responder.
  */
 static int
-get_proposal_r(iph2, use_remote_addr)
+get_proposal_r_remote(iph2, ignore_id)
 	struct ph2handle *iph2;
-	int use_remote_addr;
+	int ignore_id;
 {
 	struct policyindex spidx;
 	struct secpolicy *sp_in, *sp_out;
@@ -2398,12 +2456,15 @@ get_proposal_r(iph2, use_remote_addr)
 		return ISAKMP_NTYPE_INVALID_ID_INFORMATION;
 	}
 
-	/* make sure if id[src,dst] is null. */
-	if (iph2->src_id || iph2->dst_id) {
+	/* make sure if id[src,dst] is null (if use_remote_addr == 0). */
+	if (!ignore_id && (iph2->src_id || iph2->dst_id)) {
 		plog(LLV_ERROR, LOCATION, NULL,
 			"Why do ID[src,dst] exist already.\n");
 		return ISAKMP_INTERNAL_ERROR;
 	}
+
+	plog(LLV_DEBUG, LOCATION, NULL,
+		 "%s: ignore_id %x.\n", __FUNCTION__, ignore_id);
 
 	memset(&spidx, 0, sizeof(spidx));
 
@@ -2420,7 +2481,7 @@ get_proposal_r(iph2, use_remote_addr)
 	 * use the nat's address in the ID payload.
 	 */
 	if (iph2->id != NULL
-	 && use_remote_addr == 0
+	 && ignore_id == 0
 	 && (_XIDT(iph2->id) == IPSECDOI_ID_IPV4_ADDR
 	  || _XIDT(iph2->id) == IPSECDOI_ID_IPV6_ADDR
 	  || _XIDT(iph2->id) == IPSECDOI_ID_IPV4_ADDR_SUBNET
@@ -2486,7 +2547,7 @@ get_proposal_r(iph2, use_remote_addr)
 
 	/* make source address in spidx */
 	if (iph2->id_p != NULL
-	 && use_remote_addr == 0
+	 && ignore_id == 0
 	 && (_XIDT(iph2->id_p) == IPSECDOI_ID_IPV4_ADDR
 	  || _XIDT(iph2->id_p) == IPSECDOI_ID_IPV6_ADDR
 	  || _XIDT(iph2->id_p) == IPSECDOI_ID_IPV4_ADDR_SUBNET
@@ -2577,7 +2638,7 @@ get_proposal_r(iph2, use_remote_addr)
 		spidx.ul_proto = IPSEC_ULPROTO_ANY;
 
 	/* get inbound policy */
-	sp_in = getsp_r(&spidx);
+	sp_in = getsp_r(&spidx, iph2);
 	if (sp_in == NULL || sp_in->policy == IPSEC_POLICY_GENERATE) {
 		if (iph2->ph1->rmconf->gen_policy) {
 		        if (sp_in)
@@ -2602,21 +2663,6 @@ get_proposal_r(iph2, use_remote_addr)
 			        "no policy found: %s\n", spidx2str(&spidx));
 			return ISAKMP_INTERNAL_ERROR;
 		}
-	} else {
-	        /* Refresh existing generated policies
-		 */
-	        if (iph2->ph1->rmconf->gen_policy) {
-		        plog(LLV_INFO, LOCATION, NULL,
-			        "Update the generated policy : %s\n",
-			        spidx2str(&spidx));
-			iph2->spidx_gen = racoon_malloc(sizeof(spidx));
-			if (!iph2->spidx_gen) {
-			        plog(LLV_ERROR, LOCATION, NULL,
-				        "buffer allocation failed.\n");
-				return ISAKMP_INTERNAL_ERROR;
-			}
-			memcpy(iph2->spidx_gen, &spidx, sizeof(spidx));
-		}
 	}
     
 	/* get outbound policy */
@@ -2632,7 +2678,7 @@ get_proposal_r(iph2, use_remote_addr)
 	spidx.prefs = spidx.prefd;
 	spidx.prefd = pref;
 
-	sp_out = getsp_r(&spidx);
+	sp_out = getsp_r(&spidx, iph2);
 	if (!sp_out) {
 		plog(LLV_WARNING, LOCATION, NULL,
 			"no outbound policy found: %s\n",
