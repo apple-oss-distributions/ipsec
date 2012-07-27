@@ -82,6 +82,7 @@
 #include "nattraversal.h"
 #include "grabmyaddr.h"
 #include "localconf.h"
+#include "crypto_openssl.h"
 
 int
 isakmp_sendfrags(iph1, buf) 
@@ -96,7 +97,6 @@ isakmp_sendfrags(iph1, buf)
 	size_t max_datalen;
 	size_t fraglen;
 	vchar_t *frag;
-	unsigned int trailer;
 	unsigned int fragnum = 0;
 	size_t len;
 	int etype;
@@ -110,7 +110,7 @@ isakmp_sendfrags(iph1, buf)
 
 
 	/* select the socket to be sent */
-	s = getsockmyaddr(iph1->local);
+	s = getsockmyaddr((struct sockaddr *)iph1->local);
 	if (s == -1){
 		return -1;
 	}
@@ -176,7 +176,7 @@ isakmp_sendfrags(iph1, buf)
 				vfree(frag);
 				return -1;
 			}
-			*(u_int32_t *)vbuf->v = 0; // non-esp marker
+			*ALIGNED_CAST(u_int32_t *)vbuf->v = 0; // non-esp marker
 			memcpy(vbuf->v + extralen, frag->v, frag->l);
 			vfree(frag);
 			frag = vbuf;
@@ -209,7 +209,7 @@ vendorid_frag_cap(gen)
 	int *hp;
 	int hashlen_bytes = eay_md5_hashlen() >> 3;
 
-	hp = (int *)(gen + 1);
+	hp = ALIGNED_CAST(int *)(gen + 1);
 
 	return ntohl(hp[hashlen_bytes / sizeof(*hp)]);
 }
@@ -223,7 +223,6 @@ isakmp_frag_extract(iph1, msg)
 	struct isakmp_frag *frag;
 	struct isakmp_frag_item *item;
 	vchar_t *buf;
-	size_t len;
 	int last_frag = 0;
 	char *data;
 	int i;
@@ -263,6 +262,7 @@ isakmp_frag_extract(iph1, msg)
 		vfree(buf);
 		return -1;
 	}
+	bzero(item, sizeof(*item));
 
 	data = (char *)(frag + 1);
 	memcpy(buf->v, data, buf->l);
@@ -281,14 +281,29 @@ isakmp_frag_extract(iph1, msg)
 		iph1->frag_chain = item;
 	} else {
 		struct isakmp_frag_item *current;
+		int dup = 0;
 
 		current = iph1->frag_chain;
+		if (!current->frag_next && current->frag_last) {
+			last_frag = current->frag_num;
+		}
 		while (current->frag_next) {
 			if (current->frag_last)
-				last_frag = item->frag_num;
+				last_frag = current->frag_num;
+			if (current->frag_num == item->frag_num) {
+				dup = 1;
+			}
 			current = current->frag_next;
 		}
-		current->frag_next = item;
+		// avoid duplicates
+		if (!dup) {
+			current->frag_next = item;
+		} else {
+			racoon_free(item);
+			vfree(buf);
+			item = NULL;
+			buf = NULL;
+		}
 	}
 
 	/* If we saw the last frag, check if the chain is complete */
@@ -322,7 +337,7 @@ isakmp_frag_reassembly(iph1)
 	struct isakmp_frag_item *item;
 	size_t len = 0;
 	vchar_t *buf = NULL;
-	int frag_count = 0;
+	int frag_count = 0, frag_max = 0;
 	int i;
 	char *data;
 
@@ -333,6 +348,9 @@ isakmp_frag_reassembly(iph1)
 
 	do {
 		frag_count++;
+		if (item->frag_num > frag_max && item->frag_last) {
+			frag_max = item->frag_num;
+		}
 		len += item->frag_packet->l;
 		item = item->frag_next;
 	} while (item != NULL);
@@ -343,7 +361,7 @@ isakmp_frag_reassembly(iph1)
 	}
 	data = buf->v;
 
-	for (i = 1; i <= frag_count; i++) {
+	for (i = 1; i <= frag_max; i++) {
 		item = iph1->frag_chain;
 		do {
 			if (item->frag_num == i)
@@ -356,7 +374,7 @@ isakmp_frag_reassembly(iph1)
 			    "Missing fragment #%d\n", i);
 			vfree(buf);
 			buf = NULL;
-			goto out;
+			return buf;
 		}
 		memcpy(data, item->frag_packet->v, item->frag_packet->l);
 		data += item->frag_packet->l;
@@ -389,7 +407,7 @@ isakmp_frag_addcap(buf, cap)
 	vchar_t *buf;
 	int cap;
 {
-	int *capp;
+	int val, *capp;
 	size_t len;
 	int hashlen_bytes = eay_md5_hashlen() >> 3;
 
@@ -401,13 +419,14 @@ isakmp_frag_addcap(buf, cap)
 			    "Cannot allocate memory\n");
 			return NULL;
 		}
-		capp = (int *)(buf->v + len);
-		*capp = htonl(0);
-	}
-
-	capp = (int *)(buf->v + hashlen_bytes);
-	*capp |= htonl(cap);
-
+        val = 0;                                    
+        memcpy(buf->v + len, &val, sizeof(val));        // Wcast_lign fix - copy instead of assign for unaligned move
+    }
+    capp = (int *)(void*)(buf->v + hashlen_bytes);      // Wcast_lign fix - copy instead of assign for unaligned move
+    memcpy(&val, capp, sizeof(val));
+    val |= htonl(cap);
+    memcpy(capp, &val, sizeof(val));
+           
 	return buf;
 }
 
@@ -415,8 +434,8 @@ int
 sendfragsfromto(s, buf, local, remote, count_persend, frag_flags) 
 	int              s;
 	vchar_t         *buf;
-	struct sockaddr *local;
-	struct sockaddr *remote;
+	struct sockaddr_storage *local;
+	struct sockaddr_storage *remote;
 	int              count_persend;
 	u_int32_t        frag_flags;
 {
@@ -429,7 +448,6 @@ sendfragsfromto(s, buf, local, remote, count_persend, frag_flags)
 	size_t max_datalen;
 	size_t fraglen;
 	vchar_t *frag;
-	unsigned int trailer;
 	unsigned int fragnum = 0;
 	size_t len;
 #ifdef ENABLE_NATT
@@ -500,7 +518,7 @@ sendfragsfromto(s, buf, local, remote, count_persend, frag_flags)
 				vfree(frag);
 				return -1;
 			}
-			*(u_int32_t *)vbuf->v = 0; // non-esp marker
+			*ALIGNED_CAST(u_int32_t *)vbuf->v = 0; // non-esp marker
 			memcpy(vbuf->v + extralen, frag->v, frag->l);
 			vfree(frag);
 			frag = vbuf;
