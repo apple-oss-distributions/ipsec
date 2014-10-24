@@ -192,7 +192,8 @@ ike_session_release_session (ike_session_t *session)
 ike_session_t *
 ike_session_get_session (struct sockaddr_storage *local,
 						 struct sockaddr_storage *remote,
-						 int              alloc_if_absent)
+						 int              alloc_if_absent,
+						 isakmp_index *optionalIndex)
 {
 	ike_session_t    *p = NULL;
 	ike_session_id_t  id;
@@ -266,6 +267,11 @@ ike_session_get_session (struct sockaddr_storage *local,
 			continue;
 		}
 
+		// Skip if the spi doesn't match
+		if (optionalIndex != NULL && ike_session_getph1byindex(p, optionalIndex) == NULL) {
+			continue;
+		}
+
 		if (memcmp(&p->session_id, &id, sizeof(id)) == 0) {
 			plog(ASL_LEVEL_DEBUG,
 				 "Pre-existing IKE-Session to %s. case 1.\n",
@@ -282,6 +288,9 @@ ike_session_get_session (struct sockaddr_storage *local,
 				 saddr2str((struct sockaddr *)remote));			
 			return p;
 		} else if (is_isakmp_remote_port && memcmp(&p->session_id, &id_wop, sizeof(id_wop)) == 0) {
+			best_match = p;
+		} else if (optionalIndex != NULL) {
+			// If the SPI did match, this one counts as a best match
 			best_match = p;
 		}
 	}
@@ -350,9 +359,7 @@ ike_session_update_mode (phase2_handle_t *iph2)
 	}
     if (iph2->phase2_type != PHASE2_TYPE_SA)
         return;
-	if (iph2->version == ISAKMP_VERSION_NUMBER_IKEV2) {
-		return; // for now
-	}
+	
 	// exit early if we already detected cisco-ipsec
 	if (iph2->parent_session->is_cisco_ipsec) {
 		return;
@@ -918,7 +925,7 @@ ike_session_replace_other_ph1 (phase1_handle_t *new_iph1,
 	/*
 	 * if we are responder, then we should wait until the server sends a delete notification.
 	 */
-	if ((new_iph1->version == ISAKMP_VERSION_NUMBER_IKEV2 || session->is_client) &&
+	if (session->is_client &&
 		new_iph1->side == RESPONDER) {
 		return;
 	}
@@ -966,7 +973,7 @@ ike_session_cleanup_other_established_ph1s (ike_session_t    *session,
 	/*
 	 * if we are responder, then we should wait until the server sends a delete notification.
 	 */
-	if ((new_iph1->version == ISAKMP_VERSION_NUMBER_IKEV2 || session->is_client) &&
+	if (session->is_client &&
 		new_iph1->side == RESPONDER) {
 		return;
 	}
@@ -1815,7 +1822,7 @@ ike_session_drop_rekey (ike_session_t *session, ike_session_rekey_type_t rekey_t
 			}
 		} else if (!session->is_btmm_ipsec) {
 			if (rekey_type == IKE_SESSION_REKEY_TYPE_PH1 &&
-				!ike_session_has_negoing_ph2(session)) {
+				!ike_session_has_negoing_ph2(session) && !ike_session_has_established_ph2(session)) {
 				// for vpn: only drop ph1 if there are no more ph2s.
 				plog(ASL_LEVEL_DEBUG, "vpn session is idle: drop ph1 rekey.\n");
 				return 1;
@@ -1975,7 +1982,7 @@ ike_session_assert (struct sockaddr_storage *local,
 		return -1;
 	}
 
-	if ((sess = ike_session_get_session(local, remote, FALSE))) {
+	if ((sess = ike_session_get_session(local, remote, FALSE, NULL))) {
 		return(ike_session_assert_session(sess));
 	}
 	return -1;

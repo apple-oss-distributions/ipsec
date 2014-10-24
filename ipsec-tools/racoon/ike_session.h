@@ -69,7 +69,6 @@ typedef struct ike_session_sastats {
     struct sastat                        out_last_poll[8];
 } ike_sesssion_sastats_t;
 
-
 struct ike_session {
 	u_int8_t				             mode;			/* mode of protocol, see ipsec.h */
 	u_int16_t                            proto;			/* IPPROTO_ESP or IPPROTO_AH */
@@ -110,7 +109,6 @@ struct ike_session {
     LIST_HEAD(_ph2tree_, phase2handle)   ph2tree;
 
 	LIST_ENTRY(ike_session)              chain;
-
 };
 
 typedef enum ike_session_rekey_type {
@@ -129,7 +127,7 @@ extern const char * ike_session_stopped_by_peer;
 extern void               ike_session_init (void);
 extern ike_session_t *    ike_session_create_session (ike_session_id_t *session_id);
 extern void               ike_session_release_session (ike_session_t *session);
-extern ike_session_t *	  ike_session_get_session (struct sockaddr_storage *, struct sockaddr_storage *, int);
+extern ike_session_t *	  ike_session_get_session (struct sockaddr_storage *, struct sockaddr_storage *, int, isakmp_index *);
 extern u_int              ike_session_get_rekey_lifetime (int, u_int);
 extern void               ike_session_update_mode (phase2_handle_t *iph2);
 extern int                ike_session_link_phase1 (ike_session_t *, phase1_handle_t *);

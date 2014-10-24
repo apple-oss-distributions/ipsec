@@ -101,8 +101,6 @@
 #include "ipsecMessageTracer.h"
 #include "power_mgmt.h"
 #include "session.h"
-#include "ikev2_rfc.h"
-#include "api_support.h"
 
 #if defined(SADB_X_EALG_RIJNDAELCBC) && !defined(SADB_X_EALG_AESCBC)
 #define SADB_X_EALG_AESCBC  SADB_X_EALG_RIJNDAELCBC
@@ -234,7 +232,6 @@ pfkey_process(msg)
 			strerror(msg->sadb_msg_errno));
 		goto end;
 	}
-
     
 	/* safety check */
 	if (msg->sadb_msg_type >= ARRAYLEN(pkrecvf)) {
@@ -794,6 +791,7 @@ pfkey_convertfromipsecdoi(iph2, proto_id, t_id, hashtype,
 		if ((*a_keylen = keylen_aalg(hashtype)) == ~0)
 			goto bad;
 		*a_keylen >>= 3;
+			
 		if (*e_type == SADB_EALG_NONE) {
 			plog(ASL_LEVEL_ERR, "no ESP algorithm.\n");
 			goto bad;
@@ -1096,7 +1094,6 @@ pk_sendupdate(iph2)
 	u_int wsize = 4;  /* XXX static size of window */ 
 	int proxy = 0;
 	struct ph2natt natt;
-    struct satrns *tr;
     int authtype;
 
 	/* sanity check */
@@ -1170,15 +1167,18 @@ pk_sendupdate(iph2)
 			memset (&natt, 0, sizeof (natt));
 			natt.sport = extract_port (iph2->ph1->remote);
 			flags |= SADB_X_EXT_NATT;
-			if (iph2->ph1->natt_flags & NAT_DETECTED_ME) {
+			if (iph2->ph1->rmconf->natt_multiple_user == TRUE &&
+				mode == IPSEC_MODE_TRANSPORT &&
+				src->ss_family == AF_INET) {
+				flags |= SADB_X_EXT_NATT_MULTIPLEUSERS;
+				if (iph2->ph1->natt_flags & NAT_DETECTED_PEER) {
+					// is mutually exclusive with SADB_X_EXT_NATT_KEEPALIVE
+					flags |= SADB_X_EXT_NATT_DETECTED_PEER;
+				}
+			} else if (iph2->ph1->natt_flags & NAT_DETECTED_ME) {
 				if (iph2->ph1->rmconf->natt_keepalive == TRUE)
 					flags |= SADB_X_EXT_NATT_KEEPALIVE;
 			} else {
-				if (iph2->ph1->rmconf->natt_multiple_user == TRUE &&
-					mode == IPSEC_MODE_TRANSPORT &&
-					src->ss_family == AF_INET) {
-					flags |= SADB_X_EXT_NATT_MULTIPLEUSERS;
-				}
 				if (iph2->ph1->natt_flags & NAT_DETECTED_PEER) {
 					// is mutually exclusive with SADB_X_EXT_NATT_KEEPALIVE
 					flags |= SADB_X_EXT_NATT_DETECTED_PEER;
@@ -1293,7 +1293,6 @@ pk_recvupdate(mhp)
 			 iph2->status);
 		return -1;
 	}
-    //%%%% fix for IKEv2
 	if (iph2->status != IKEV1_STATE_QUICK_I_ADDSA &&
         iph2->status != IKEV1_STATE_QUICK_R_ADDSA) {
 		plog(ASL_LEVEL_ERR,
@@ -1406,7 +1405,6 @@ pk_sendadd(iph2)
 	u_int wsize = 4; /* XXX static size of window */ 
 	int proxy = 0;
 	struct ph2natt natt;
-    struct satrns *tr;
     int authtype;
 
 	/* sanity check */
@@ -1481,15 +1479,18 @@ pk_sendadd(iph2)
 			memset (&natt, 0, sizeof (natt));
 			natt.dport = extract_port (iph2->ph1->remote);
 			flags |= SADB_X_EXT_NATT;
-			if (iph2->ph1->natt_flags & NAT_DETECTED_ME) {
+			if (iph2->ph1->rmconf->natt_multiple_user == TRUE &&
+				mode == IPSEC_MODE_TRANSPORT &&
+				src->ss_family == AF_INET) {
+				flags |= SADB_X_EXT_NATT_MULTIPLEUSERS;
+				if (iph2->ph1->natt_flags & NAT_DETECTED_PEER) {
+					// is mutually exclusive with SADB_X_EXT_NATT_KEEPALIVE
+					flags |= SADB_X_EXT_NATT_DETECTED_PEER;
+				}
+			} else if (iph2->ph1->natt_flags & NAT_DETECTED_ME) {
 				if (iph2->ph1->rmconf->natt_keepalive == TRUE)
 					flags |= SADB_X_EXT_NATT_KEEPALIVE;
 			} else {
-				if (iph2->ph1->rmconf->natt_multiple_user == TRUE &&
-					mode == IPSEC_MODE_TRANSPORT &&
-					dst->ss_family == AF_INET) {
-					flags |= SADB_X_EXT_NATT_MULTIPLEUSERS;
-				}
 				if (iph2->ph1->natt_flags & NAT_DETECTED_PEER) {
 					// is mutually exclusive with SADB_X_EXT_NATT_KEEPALIVE
 					flags |= SADB_X_EXT_NATT_DETECTED_PEER;
@@ -1703,31 +1704,29 @@ pk_recvexpire(mhp)
 
 	/* turn off the timer for calling isakmp_ph2expire() */ 
 	SCHED_KILL(iph2->sce);
+	
+	fsm_set_state(&iph2->status, IKEV1_STATE_PHASE2_EXPIRED);
+	
+	/* INITIATOR, begin phase 2 exchange only if there's no other established ph2. */
+	/* allocate buffer for status management of pfkey message */
+	if (iph2->side == INITIATOR &&
+		!ike_session_has_other_established_ph2(iph2->parent_session, iph2) &&
+		!ike_session_drop_rekey(iph2->parent_session, IKE_SESSION_REKEY_TYPE_PH2)) {
 
-		fsm_set_state(&iph2->status, IKEV1_STATE_PHASE2_EXPIRED);
+		ike_session_initph2(iph2);
 
-    {
-        /* INITIATOR, begin phase 2 exchange only if there's no other established ph2. */
-        /* allocate buffer for status management of pfkey message */
-        if (iph2->side == INITIATOR &&
-            !ike_session_has_other_established_ph2(iph2->parent_session, iph2) &&
-            !ike_session_drop_rekey(iph2->parent_session, IKE_SESSION_REKEY_TYPE_PH2)) {
+		/* start isakmp initiation by using ident exchange */
+		if (isakmp_post_acquire(iph2) < 0) {
+			plog(ASL_LEVEL_ERR,
+				"failed to begin ipsec sa "
+				"re-negotiation.\n");
+			ike_session_unlink_phase2(iph2);
+			return -1;
+		}
 
-            ike_session_initph2(iph2);
-
-            /* start isakmp initiation by using ident exchange */
-            if (isakmp_post_acquire(iph2) < 0) {
-                plog(ASL_LEVEL_ERR,
-                    "failed to begin ipsec sa "
-                    "re-negotiation.\n");
-                ike_session_unlink_phase2(iph2);
-                return -1;
-            }
-
-            return 0;
-            /*NOTREACHED*/
-        }
-    }
+		return 0;
+		/*NOTREACHED*/
+	}
 
 
 	/* If not received SADB_EXPIRE, INITIATOR delete ph2handle. */
@@ -1968,7 +1967,7 @@ pk_recvacquire(mhp)
 	}
 
     if (session == NULL)
-        session = ike_session_get_session(iph2->src, iph2->dst, 1);    
+        session = ike_session_get_session(iph2->src, iph2->dst, 1, NULL);
     if (session == NULL)
         fatal_error(-1);
 
