@@ -53,9 +53,6 @@
 #  include <time.h>
 # endif
 #endif
-#ifdef ENABLE_HYBRID
-#include <resolv.h>
-#endif
 
 #ifndef HAVE_NETINET6_IPSEC
 #include <netinet/ipsec.h>
@@ -691,7 +688,7 @@ quick_i2recv(iph2, msg0)
 		goto end;
 	}
 
-	result = memcmp(my_hash->v, r_hash, my_hash->l);
+	result = timingsafe_bcmp(my_hash->v, r_hash, my_hash->l);
 	vfree(my_hash);
 
 	if (result) {
@@ -1020,7 +1017,7 @@ quick_i4recv(iph2, msg0)
 		goto end;
 	}
 
-	result = memcmp(my_hash->v, r_hash, my_hash->l);
+	result = timingsafe_bcmp(my_hash->v, r_hash, my_hash->l);
 	vfree(my_hash);
 
 	if (result) {
@@ -1357,7 +1354,7 @@ quick_r1recv(iph2, msg0)
 		goto end;
 	}
 
-	result = memcmp(my_hash->v, r_hash, my_hash->l);
+	result = timingsafe_bcmp(my_hash->v, r_hash, my_hash->l);
 	vfree(my_hash);
 
 	if (result) {
@@ -1385,7 +1382,8 @@ quick_r1recv(iph2, msg0)
 			plog(ASL_LEVEL_ERR,
 				"failed to generate a proposal template "
 				"from client's proposal.\n");
-			return ISAKMP_INTERNAL_ERROR;
+			error = ISAKMP_INTERNAL_ERROR;
+			goto end;
 		}
 		/*FALLTHROUGH*/
 	case 0:
@@ -1891,7 +1889,7 @@ quick_r3recv(iph2, msg0)
 		goto end;
 	}
 
-	result = memcmp(my_hash->v, r_hash, my_hash->l);
+	result = timingsafe_bcmp(my_hash->v, r_hash, my_hash->l);
 	vfree(my_hash);
 
 	if (result) {
@@ -2610,11 +2608,11 @@ get_proposal_r_remote(iph2, ignore_id)
 	if (sp_in == NULL || sp_in->policy == IPSEC_POLICY_GENERATE) {
 		if (iph2->ph1->rmconf->gen_policy) {
 		        if (sp_in)
-                                plog(ASL_LEVEL_INFO, 
+                                plog(ASL_LEVEL_NOTICE, 
 				        "Update the generated policy : %s\n",
 				        spidx2str(&spidx));
 			else
-			        plog(ASL_LEVEL_INFO, 
+			        plog(ASL_LEVEL_NOTICE, 
 				        "no policy found, "
 				        "try to generate the policy : %s\n",
 				        spidx2str(&spidx));
