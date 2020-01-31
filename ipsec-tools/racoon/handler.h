@@ -51,8 +51,13 @@
 #endif
 #include <sys/socket.h>
 
-#include <schedule.h>
+#include "schedule.h"
+
+#if __has_include(<nw/private.h>)
+#include <nw/private.h>
+#else
 #include <network/nat64.h>
+#endif
 
 /* About address semantics in each case.
  *			initiator(addr=I)	responder(addr=R)
