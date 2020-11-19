@@ -156,6 +156,15 @@
 		6912CB741E78D9D800631D9A /* plog.c in Sources */ = {isa = PBXBuildFile; fileRef = 25F258FD0988657000D15623 /* plog.c */; };
 		6912CB761E78DD7100631D9A /* SystemConfiguration.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 6912CB751E78DD7100631D9A /* SystemConfiguration.framework */; };
 		6912CB771E78DD8800631D9A /* Preferences.c in Sources */ = {isa = PBXBuildFile; fileRef = BACD8C681496A50C0042DEA1 /* Preferences.c */; };
+		697EFE7324281E030032C70E /* ipsec_doi.c in Sources */ = {isa = PBXBuildFile; fileRef = 25F258CF0988657000D15623 /* ipsec_doi.c */; };
+		697EFE742428278D0032C70E /* strnames.c in Sources */ = {isa = PBXBuildFile; fileRef = 25F2591F0988657000D15623 /* strnames.c */; };
+		697EFE75242951900032C70E /* algorithm.c in Sources */ = {isa = PBXBuildFile; fileRef = 25F258AE0988657000D15623 /* algorithm.c */; };
+		697EFE77242952370032C70E /* oakley.c in Sources */ = {isa = PBXBuildFile; fileRef = 25F258F30988657000D15623 /* oakley.c */; };
+		697EFE78242952560032C70E /* crypto_openssl.c in Sources */ = {isa = PBXBuildFile; fileRef = 25F258B90988657000D15623 /* crypto_openssl.c */; };
+		697EFE7A2429CDAF0032C70E /* isakmp_cfg.c in Sources */ = {isa = PBXBuildFile; fileRef = 25F258D50988657000D15623 /* isakmp_cfg.c */; };
+		697EFE822429D70C0032C70E /* sockmisc.c in Sources */ = {isa = PBXBuildFile; fileRef = 25F2591A0988657000D15623 /* sockmisc.c */; };
+		697EFE832429E4A00032C70E /* pfkey_racoon.c in Sources */ = {isa = PBXBuildFile; fileRef = 25F258F80988657000D15623 /* pfkey_racoon.c */; };
+		697EFE842429E4C80032C70E /* policy.c in Sources */ = {isa = PBXBuildFile; fileRef = 25F258FF0988657000D15623 /* policy.c */; };
 		72265DDC0F818F9300730A7D /* ipsec.plist in CopyFiles */ = {isa = PBXBuildFile; fileRef = 72265DDB0F818F9300730A7D /* ipsec.plist */; };
 		723B6A30162F7BE300895EE5 /* xpc_racoon.c in Sources */ = {isa = PBXBuildFile; fileRef = 723B6A2F162F7BE300895EE5 /* xpc_racoon.c */; };
 		723B6A31162F7BE300895EE5 /* xpc_racoon.c in Sources */ = {isa = PBXBuildFile; fileRef = 723B6A2F162F7BE300895EE5 /* xpc_racoon.c */; };
@@ -260,12 +269,6 @@
 		BA485FA3109C1ECA00545E19 /* power_mgmt.c in Sources */ = {isa = PBXBuildFile; fileRef = BA485FA1109C1ECA00545E19 /* power_mgmt.c */; };
 		BA48611C109C2BBA00545E19 /* IOKit.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = BA48611B109C2BBA00545E19 /* IOKit.framework */; };
 		BA486225109C2BF500545E19 /* IOKit.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = BA48611B109C2BBA00545E19 /* IOKit.framework */; };
-		BA5B6F2A0EC19F40003774E7 /* ipsecConfigTracer.c in Sources */ = {isa = PBXBuildFile; fileRef = BA5B6F280EC19F40003774E7 /* ipsecConfigTracer.c */; };
-		BA5B6F2B0EC19F40003774E7 /* ipsecSessionTracer.c in Sources */ = {isa = PBXBuildFile; fileRef = BA5B6F290EC19F40003774E7 /* ipsecSessionTracer.c */; };
-		BA5B6F2C0EC19F40003774E7 /* ipsecConfigTracer.c in Sources */ = {isa = PBXBuildFile; fileRef = BA5B6F280EC19F40003774E7 /* ipsecConfigTracer.c */; };
-		BA5B6F2D0EC19F40003774E7 /* ipsecSessionTracer.c in Sources */ = {isa = PBXBuildFile; fileRef = BA5B6F290EC19F40003774E7 /* ipsecSessionTracer.c */; };
-		BA5B6F310EC19F80003774E7 /* ipsecPolicyTracer.c in Sources */ = {isa = PBXBuildFile; fileRef = BA5B6F300EC19F80003774E7 /* ipsecPolicyTracer.c */; };
-		BA5B6F320EC19F80003774E7 /* ipsecPolicyTracer.c in Sources */ = {isa = PBXBuildFile; fileRef = BA5B6F300EC19F80003774E7 /* ipsecPolicyTracer.c */; };
 		BA64A934114EFE8C00F3574C /* racoon.sb in CopyFiles */ = {isa = PBXBuildFile; fileRef = BA64A933114EFE5C00F3574C /* racoon.sb */; };
 		BA6F109B0EA1DEC200546773 /* ike_session.c in Sources */ = {isa = PBXBuildFile; fileRef = BA6F109A0EA1DEC200546773 /* ike_session.c */; };
 		BA6F109C0EA1DEC200546773 /* ike_session.c in Sources */ = {isa = PBXBuildFile; fileRef = BA6F109A0EA1DEC200546773 /* ike_session.c */; };
@@ -1510,8 +1513,6 @@
 				25DE2DE90A8BD40E0010A46D /* vpn_control.c in Sources */,
 				81CA08920CE3BC870055C0AF /* vpn.c in Sources */,
 				BA6F109B0EA1DEC200546773 /* ike_session.c in Sources */,
-				BA5B6F2A0EC19F40003774E7 /* ipsecConfigTracer.c in Sources */,
-				BA5B6F2B0EC19F40003774E7 /* ipsecSessionTracer.c in Sources */,
 				BA485FA2109C1ECA00545E19 /* power_mgmt.c in Sources */,
 				81CBCFE91447A1C20000D6E6 /* fsm.c in Sources */,
 				BACD8C6A1496A50C0042DEA1 /* Preferences.c in Sources */,
@@ -1530,7 +1531,6 @@
 				25ECCDA209AD479A00883CA3 /* pfkey.c in Sources */,
 				25F258910988648C00D15623 /* setkey.c in Sources */,
 				25F258940988648C00D15623 /* token.l in Sources */,
-				BA5B6F310EC19F80003774E7 /* ipsecPolicyTracer.c in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -1538,6 +1538,15 @@
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				697EFE842429E4C80032C70E /* policy.c in Sources */,
+				697EFE832429E4A00032C70E /* pfkey_racoon.c in Sources */,
+				697EFE822429D70C0032C70E /* sockmisc.c in Sources */,
+				697EFE7A2429CDAF0032C70E /* isakmp_cfg.c in Sources */,
+				697EFE78242952560032C70E /* crypto_openssl.c in Sources */,
+				697EFE77242952370032C70E /* oakley.c in Sources */,
+				697EFE75242951900032C70E /* algorithm.c in Sources */,
+				697EFE742428278D0032C70E /* strnames.c in Sources */,
+				697EFE7324281E030032C70E /* ipsec_doi.c in Sources */,
 				7253CC651E7B3F4600B2DDF5 /* racoon_test.c in Sources */,
 				6912CB771E78DD8800631D9A /* Preferences.c in Sources */,
 				6912CB741E78D9D800631D9A /* plog.c in Sources */,
@@ -1595,8 +1604,6 @@
 				812530F20D3FE9DC006BDF4F /* vpn_control.c in Sources */,
 				812530F30D3FE9DC006BDF4F /* vpn.c in Sources */,
 				BA6F109C0EA1DEC200546773 /* ike_session.c in Sources */,
-				BA5B6F2C0EC19F40003774E7 /* ipsecConfigTracer.c in Sources */,
-				BA5B6F2D0EC19F40003774E7 /* ipsecSessionTracer.c in Sources */,
 				BA485FA3109C1ECA00545E19 /* power_mgmt.c in Sources */,
 				BACD8C6B1496A50C0042DEA1 /* Preferences.c in Sources */,
 				72F5C72F1607A1AE004C192F /* api_support.c in Sources */,
@@ -1614,7 +1621,6 @@
 				81DDFD9E0D622C1700C5CB87 /* pfkey.c in Sources */,
 				81DDFD9F0D622C1700C5CB87 /* setkey.c in Sources */,
 				81DDFDA00D622C1700C5CB87 /* token.l in Sources */,
-				BA5B6F320EC19F80003774E7 /* ipsecPolicyTracer.c in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -2179,6 +2185,7 @@
 				CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
 				"CODE_SIGN_IDENTITY[sdk=iphoneos*]" = "-";
 				COPY_PHASE_STRIP = NO;
+				DEAD_CODE_STRIPPING = YES;
 				DEBUG_INFORMATION_FORMAT = dwarf;
 				ENABLE_STRICT_OBJC_MSGSEND = YES;
 				ENABLE_TESTABILITY = YES;

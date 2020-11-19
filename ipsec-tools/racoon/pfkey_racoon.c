@@ -97,8 +97,6 @@
 #include "vpn_control.h"
 #include "vpn_control_var.h"
 #include "ike_session.h"
-#include "ipsecSessionTracer.h"
-#include "ipsecMessageTracer.h"
 #include "power_mgmt.h"
 #include "session.h"
 
@@ -164,8 +162,6 @@ NULL, /* SADB_MIGRATE */
 #warning "SADB extra message?"
 #endif
 };
-
-static int addnewsp (caddr_t *);
 
 /* cope with old kame headers - ugly */
 #ifndef SADB_X_AALG_MD5
@@ -1349,18 +1345,6 @@ pk_recvupdate(mhp)
 	
 	/* update status */
 	fsm_set_state(&iph2->status, IKEV1_STATE_PHASE2_ESTABLISHED);
-
-	if (iph2->side == INITIATOR) {
-		IPSECSESSIONTRACEREVENT(iph2->parent_session,
-								IPSECSESSIONEVENTCODE_IKEV1_PH2_INIT_SUCC,
-								CONSTSTR("Initiator, Quick-Mode"),
-								CONSTSTR(NULL));
-	} else {
-		IPSECSESSIONTRACEREVENT(iph2->parent_session,
-								IPSECSESSIONEVENTCODE_IKEV1_PH2_RESP_SUCC,
-								CONSTSTR("Responder, Quick-Mode"),
-								CONSTSTR(NULL));
-	}
 
 	ike_session_ph2_established(iph2);
 
@@ -2929,13 +2913,14 @@ pk_getseq()
 	return eay_random();
 }
 
-static int
+int
 addnewsp(mhp)
 	caddr_t *mhp;
 {
 	struct secpolicy *new;
 	struct sadb_address *saddr, *daddr;
 	struct sadb_x_policy *xpl;
+	struct sadb_ext *ext;
 
 	/* sanity check */
 	if (mhp[SADB_EXT_ADDRESS_SRC] == NULL
@@ -2948,7 +2933,14 @@ addnewsp(mhp)
 
 	saddr = ALIGNED_CAST(struct sadb_address *)mhp[SADB_EXT_ADDRESS_SRC];    // Wcast-align fix (void*) - mhp contains pointers to aligned structs in malloc'd msg buffer
 	daddr = ALIGNED_CAST(struct sadb_address *)mhp[SADB_EXT_ADDRESS_DST];
+
 	xpl = ALIGNED_CAST(struct sadb_x_policy *)mhp[SADB_X_EXT_POLICY];
+	/* validity check */
+	if (PFKEY_EXTLEN(xpl) < sizeof(*xpl)) {
+		plog(ASL_LEVEL_ERR,
+			"invalid msg length.\n");
+		return -1;
+	}
 
 	new = newsp();
 	if (new == NULL) {
@@ -2977,17 +2969,16 @@ addnewsp(mhp)
 		struct sadb_x_ipsecrequest *xisr;
 		struct ipsecrequest **p_isr = &new->req;
 
-		/* validity check */
-		if (PFKEY_EXTLEN(xpl) < sizeof(*xpl)) {
-			plog(ASL_LEVEL_ERR, 
-				"invalid msg length.\n");
-			return -1;
-		}
-
 		tlen = PFKEY_EXTLEN(xpl) - sizeof(*xpl);
 		xisr = (struct sadb_x_ipsecrequest *)(xpl + 1);
 
 		while (tlen > 0) {
+			if (tlen < sizeof(*xisr) ||
+				tlen < xisr->sadb_x_ipsecrequest_len) {
+				plog(ASL_LEVEL_ERR,
+					"invalid msg length for ipsec request.\n");
+				return -1;
+			}
 
 			/* length check */
 			if (xisr->sadb_x_ipsecrequest_len < sizeof(*xisr)) {
@@ -3054,13 +3045,28 @@ addnewsp(mhp)
 			/* set IP addresses if there */
 			if (xisr->sadb_x_ipsecrequest_len > sizeof(*xisr)) {
 				struct sockaddr *paddr;
+				int rem_buf_len = xisr->sadb_x_ipsecrequest_len - sizeof(*xisr);
 
 				paddr = (struct sockaddr *)(xisr + 1);
+				if (rem_buf_len < sizeof(*paddr) ||
+					rem_buf_len < sysdep_sa_len(paddr)) {
+					plog(ASL_LEVEL_ERR,
+						"invalid msg length for src ip address.\n");
+					return -1;
+				}
 				bcopy(paddr, &(*p_isr)->saidx.src,
 					sysdep_sa_len(paddr));
 
+				rem_buf_len -= sysdep_sa_len(paddr);
+
 				paddr = (struct sockaddr *)((caddr_t)paddr
 							+ sysdep_sa_len(paddr));
+				if (rem_buf_len < sizeof(*paddr) ||
+					rem_buf_len < sysdep_sa_len(paddr)) {
+					plog(ASL_LEVEL_ERR,
+						"invalid msg length for dst ip address.\n");
+					return -1;
+				}
 				bcopy(paddr, &(*p_isr)->saidx.dst,
 					sysdep_sa_len(paddr));
 			}

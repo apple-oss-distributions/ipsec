@@ -99,8 +99,6 @@
 #include "vpn_control.h"
 #include "vpn_control_var.h"
 #include "ike_session.h"
-#include "ipsecSessionTracer.h"
-#include "ipsecMessageTracer.h"
 #include "nattraversal.h"
 
 struct isakmp_cfg_config isakmp_cfg_config;
@@ -144,10 +142,6 @@ isakmp_cfg_r(iph1, msg)
 
 	/* Check that the packet is long enough to have a header */
 	if (msg->l < sizeof(*packet)) {
-		IPSECSESSIONTRACEREVENT(iph1->parent_session,
-								IPSECSESSIONEVENTCODE_IKE_PACKET_RX_FAIL,
-								CONSTSTR("MODE-Config. Unexpected short packet"),
-								CONSTSTR("Failed to process short MODE-Config packet"));
 		plog(ASL_LEVEL_ERR, "Unexpected short packet\n");
 		return;
 	}
@@ -156,11 +150,7 @@ isakmp_cfg_r(iph1, msg)
 
 	/* Is it encrypted? It should be encrypted */
 	if ((packet->flags & ISAKMP_FLAG_E) == 0) {
-		IPSECSESSIONTRACEREVENT(iph1->parent_session,
-								IPSECSESSIONEVENTCODE_IKE_PACKET_RX_FAIL,
-								CONSTSTR("MODE-Config. User credentials sent in cleartext"),
-								CONSTSTR("Dropped cleattext User credentials"));
-		plog(ASL_LEVEL_ERR, 
+		plog(ASL_LEVEL_ERR,
 		    "User credentials sent in cleartext!\n");
 		return;
 	}
@@ -177,11 +167,7 @@ isakmp_cfg_r(iph1, msg)
 
 	dmsg = oakley_do_decrypt(iph1, msg, ivm->iv, ivm->ive);
 	if (dmsg == NULL) {
-		IPSECSESSIONTRACEREVENT(iph1->parent_session,
-								IPSECSESSIONEVENTCODE_IKE_PACKET_RX_FAIL,
-								CONSTSTR("MODE-Config. Failed to decrypt packet"),
-								CONSTSTR("Failed to decrypt MODE-Config packet"));
-		plog(ASL_LEVEL_ERR, 
+		plog(ASL_LEVEL_ERR,
 		    "failed to decrypt message\n");
 		return;
 	}
@@ -285,18 +271,7 @@ isakmp_cfg_r(iph1, msg)
 		goto out;		/* no resend scheduled */
 	SCHED_KILL(iph2->scr);	/* turn off schedule */
 	ike_session_unlink_phase2(iph2);
-
-	IPSECSESSIONTRACEREVENT(iph1->parent_session,
-							IPSECSESSIONEVENTCODE_IKE_PACKET_RX_SUCC,
-							CONSTSTR("MODE-Config"),
-							CONSTSTR(NULL));
 out:
-	if (error) {
-		IPSECSESSIONTRACEREVENT(iph1->parent_session,
-								IPSECSESSIONEVENTCODE_IKE_PACKET_RX_FAIL,
-								CONSTSTR("MODE-Config"),
-								CONSTSTR("Failed to process Mode-Config packet"));
-	}
 	vfree(dmsg);
 }
 
@@ -363,6 +338,12 @@ isakmp_cfg_reply(iph1, attrpl)
 	tlen -= sizeof(*attrpl);
 
 	while (tlen > 0) {
+		if (tlen < sizeof(struct isakmp_data)) {
+			plog(ASL_LEVEL_ERR,
+				 "isakmp_cfg_reply invalid length of isakmp data, expected %zu actual %d\n",
+				 sizeof(struct isakmp_data), tlen);
+			return -1;
+		}
 		type = ntohs(attr->type);
 
 		/* Handle short attributes */
@@ -398,10 +379,10 @@ isakmp_cfg_reply(iph1, attrpl)
 		alen = ntohs(attr->lorv);
 
 		/* Check that the attribute fit in the packet */
-		if (tlen < alen) {
-			plog(ASL_LEVEL_ERR, 
-			     "Short attribute %s\n",
-			     s_isakmp_cfg_type(type));
+		if (tlen < (alen + sizeof(struct isakmp_data))) {
+			plog(ASL_LEVEL_ERR,
+				 "Short attribute %s len %zu\n",
+				 s_isakmp_cfg_type(type), alen);
 			return -1;
 		}
 
@@ -571,6 +552,12 @@ isakmp_cfg_request(iph1, attrpl, msg)
 	memset(payload->v, 0, sizeof(*reply));
 	
 	while (tlen > 0) {
+		if (tlen < sizeof(struct isakmp_data)) {
+			plog(ASL_LEVEL_ERR,
+				 "isakmp_cfg_request invalid length of isakmp data, expected %zu actual %d\n",
+				 sizeof(struct isakmp_data), tlen);
+			goto end;
+		}
 		reply_attr = NULL;
 		type = ntohs(attr->type);
 
@@ -608,10 +595,10 @@ isakmp_cfg_request(iph1, attrpl, msg)
 		alen = ntohs(attr->lorv);
 
 		/* Check that the attribute fit in the packet */
-		if (tlen < alen) {
-			plog(ASL_LEVEL_ERR, 
-			     "Short attribute %s\n",
-			     s_isakmp_cfg_type(type));
+		if (tlen < (sizeof(struct isakmp_data) + alen)) {
+			plog(ASL_LEVEL_ERR,
+				 "Short attribute %s len %zu\n",
+				 s_isakmp_cfg_type(type), alen);
 			goto end;
 		}
 
@@ -726,6 +713,13 @@ isakmp_cfg_set(iph1, attrpl, msg)
 	 * We should send ack for the attributes we accepted 
 	 */
 	while (tlen > 0) {
+		if (tlen < sizeof(struct isakmp_data)) {
+			plog(ASL_LEVEL_ERR,
+				 "isakmp_cfg_set invalid length of isakmp data, expected %zu actual %d\n",
+				 sizeof(struct isakmp_data), tlen);
+			vfree(payload);
+			return error;
+		}
 		reply_attr = NULL;
 		type = ntohs(attr->type);
 
@@ -758,6 +752,13 @@ isakmp_cfg_set(iph1, attrpl, msg)
 			attr++;
 		} else {
 			alen = ntohs(attr->lorv);
+			if (tlen < (sizeof(*attr) + alen)) {
+				plog(ASL_LEVEL_ERR,
+					 "isakmp_cfg_set packet too short for type %d, expected %zu actual %zu\n",
+					 type, alen, tlen - sizeof(*attr));
+				vfree(payload);
+				return error;
+			}
 			tlen -= (sizeof(*attr) + alen);
 			npp = (char *)attr;
 			attr = (struct isakmp_data *)
@@ -1287,10 +1288,6 @@ isakmp_cfg_send(iph1, payload, np, flags, new_exchange, retry_count, msg)
 			VPTRINIT(iph2->sendbuf);
 			goto err;
 		}
-		IPSECSESSIONTRACEREVENT(iph1->parent_session,
-								IPSECSESSIONEVENTCODE_IKEV1_CFG_RETRANSMIT,
-								CONSTSTR("Mode-Config retransmit"),
-								CONSTSTR(NULL));
 		error = 0;
 		goto end;
 	}
@@ -1319,19 +1316,7 @@ isakmp_cfg_send(iph1, payload, np, flags, new_exchange, retry_count, msg)
 
 	error = 0;
 	VPTRINIT(iph2->sendbuf);
-
-	IPSECSESSIONTRACEREVENT(iph1->parent_session,
-							IPSECSESSIONEVENTCODE_IKE_PACKET_TX_SUCC,
-							CONSTSTR("Mode-Config message"),
-							CONSTSTR(NULL));
-	
 err:
-	if (error) {
-		IPSECSESSIONTRACEREVENT(iph1->parent_session,
-								IPSECSESSIONEVENTCODE_IKE_PACKET_TX_FAIL,
-								CONSTSTR("Mode-Config message"),
-								CONSTSTR("Failed to transmit Mode-Config message"));
-	}
 	ike_session_unlink_phase2(iph2);
 end:
 	if (hash)
